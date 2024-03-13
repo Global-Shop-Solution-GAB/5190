@@ -1,0 +1,198 @@
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+V.Local.fInventory.Declare
+V.Local.iFor.Declare
+V.Local.sRet.Declare
+V.Local.sSel.Declare
+V.Local.sSplit.Declare
+V.Local.sSQL.Declare
+
+F.Intrinsic.Control.CallSub(connect)
+F.Intrinsic.UI.InvokeWaitDialog("Loading Records","Generate MRP Date")
+F.Intrinsic.Control.CallSub(loaddtmain)
+F.Intrinsic.Control.For(V.Local.iFor,0,V.DataTable.dtMain.RowCount--,1)
+	F.Intrinsic.UI.ChangeWaitStatus("Generating Date Available",V.Local.iFor,0,V.DataTable.dtMain.Rowcount--)
+	F.Intrinsic.Control.CallSub(generate_mrp_date,"iRow",V.Local.iFor)
+F.Intrinsic.Control.Next(V.Local.iFor)
+F.Intrinsic.Control.For(V.Local.iFor,0,V.DataTable.dtMain.RowCount--,1)
+	F.Intrinsic.UI.ChangeWaitStatus("Calculating Alternate Dates",V.Local.iFor,0,V.DataTable.dtMain.Rowcount--)
+	'F.Intrinsic.Control.If(V.DataTable.dtMain(V.Local.iFor).INVENTORY!FieldValFloat,<=,0)
+		'Check to see if source is M
+		F.Intrinsic.String.Build("select A.*, E.USER36 from V_INVENTORY_ALL A left outer join INV_EXTRA E on A.PART = E.PART and A.LOCATION = E.LOCATION where A.PART = '{0}' and A.LOCATION = '{1}'",V.DataTable.dtMain(V.Local.iFor).PART!FieldValTrim,V.DataTable.dtMain(V.Local.iFor).LOCATION!FieldValTrim,V.Local.sSQL)
+		F.ODBC.Connection!con.OpenLocalRecordsetRO("rstSel",V.Local.sSQL)
+		F.Intrinsic.Control.If(V.ODBC.con!rstSel.EOF,=,False)
+			F.Intrinsic.Control.If(V.ODBC.con!rstSel.FieldValTrim!CODE_SOURCE,=,"M")
+			F.Intrinsic.Control.AndIf(V.ODBC.con!rstSel.FieldValTrim!USER36,<>,"")
+				F.Intrinsic.String.Build("PART = '{0}' and LOCATION = '{1}'",V.ODBC.con!rstSel.FieldValTrim!USER36,V.DataTable.dtMain(V.Local.iFor).LOCATION!FieldValTrim,V.Local.sSel)
+				F.Data.DataTable.Select("dtMain",V.Local.sSel,V.Local.sRet)
+				F.Intrinsic.Control.If(V.Local.sRet,<>,"***NORETURN***")
+					V.Local.sSplit.Redim(0,0)
+					F.Intrinsic.String.Split(V.Local.sRet,"*!*",V.Local.sSplit)
+					F.Intrinsic.Control.If(V.DataTable.dtMain(V.Local.sSplit(0)).INVENTORY!FieldValFloat,>,0)
+						F.Intrinsic.Math.Add(V.DataTable.dtMain(V.Local.sSplit(0)).INVENTORY!FieldValFloat,V.DataTable.dtMain(V.Local.iFor).INVENTORY!FieldValFloat,V.Local.fInventory)
+						F.Data.DataTable.SetValue("dtMain",V.Local.iFor,"INVENTORY",V.Local.fInventory,"DATE_AVAILABLE",V.DataTable.dtMain(V.Local.sSplit(0)).DATE_AVAILABLE!FieldValTrim)
+					F.Intrinsic.Control.ElseIf(V.DataTable.dtMain(V.Local.sSplit(0)).DATE_AVAILABLE!FieldValTrim,<>,"No Stock",and,V.DataTable.dtMain(V.Local.iFor).INVENTORY!FieldValFloat,<=,0)
+						F.Data.DataTable.SetValue("dtMain",V.Local.iFor,"INVENTORY",V.DataTable.dtMain(V.Local.sSplit(0)).INVENTORY!FieldValFloat,"DATE_AVAILABLE",V.DataTable.dtMain(V.Local.sSplit(0)).DATE_AVAILABLE!FieldValTrim)
+					F.Intrinsic.Control.EndIf
+				F.Intrinsic.Control.EndIf
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.EndIf
+		F.ODBC.con!rstSel.Close
+	'F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Next(V.Local.iFor)
+F.Intrinsic.Control.CallSub(savetodb)
+F.Intrinsic.UI.CloseWaitDialog
+F.Intrinsic.Control.CallSub(disconnect)
+
+Program.Sub.Main.End
+
+Program.Sub.Generate_MRP_Date.Start
+V.Local.dMRP.Declare
+V.Local.fPrev.Declare
+V.Local.fQty.Declare
+V.Local.fTemp.Declare
+V.Local.iCnt.Declare
+V.Local.iRow.Declare
+V.Local.sSQL.Declare
+V.Local.sValue.Declare
+
+V.Local.iRow.Set(V.Args.iRow)
+
+'Close dtOrder if it exists
+F.Intrinsic.Control.If(V.DataTable.dtOrder.Exists,=,True)
+    F.Data.DataTable.DeleteRow("dtOrder")
+    F.Data.DataTable.Close("dtOrder")
+F.Intrinsic.Control.EndIf
+'Close dtPO if it exists
+F.Intrinsic.Control.If(V.DataTable.dtPO.Exists,=,True)
+    F.Data.DataTable.DeleteRow("dtPO")
+    F.Data.DataTable.Close("dtPO")
+F.Intrinsic.Control.EndIf
+'Close dtWO if it exists
+F.Intrinsic.Control.If(V.DataTable.dtWO.Exists,=,True)
+    F.Data.DataTable.DeleteRow("dtWO")
+    F.Data.DataTable.Close("dtWO")
+F.Intrinsic.Control.EndIf
+'Close dtWOReq if it exists
+F.Intrinsic.Control.If(V.DataTable.dtWOReq.Exists,=,True)
+    F.Data.DataTable.DeleteRow("dtWOReq")
+    F.Data.DataTable.Close("dtWOReq")
+F.Intrinsic.Control.EndIf
+'Empty dtMRP if it exists, create it if not
+F.Intrinsic.Control.If(V.DataTable.dtMRP.Exists,=,True)
+    F.Data.DataTable.DeleteRow("dtMRP")
+F.Intrinsic.Control.Else
+    F.Data.DataTable.Create("dtMRP",True)
+F.Intrinsic.Control.EndIf
+
+F.Data.DataTable.AcceptChanges("dtMRP")
+
+'Calculate MRP if necessary
+F.Intrinsic.Control.If(V.DataTable.dtMain(V.Local.iRow).Inventory!FieldVal,>,0)
+    V.Local.sValue.Set("In Stock")
+F.Intrinsic.Control.ElseIf(V.DataTable.dtMain(V.Local.iRow).QTY_NET!FieldVal,<=,0)
+	V.Local.sValue.Set("No Stock")
+F.Intrinsic.Control.Else
+    'Calculate MRP
+    'Create dtOrder
+    F.Intrinsic.String.Build("select -QTY_BO as QTY, case when DATE_ITEM_PROM < CONVERT(NOW(),SQL_DATE) then CONVERT(NOW(),SQL_DATE) else DATE_ITEM_PROM end as DATE_MRP from V_ORDER_LINES where PART = '{0}'",V.DataTable.dtMain(V.Local.iRow).PART!FieldValTrim,V.Local.sSQL)
+    F.Data.DataTable.CreateFromSQL("dtOrder","con",V.Local.sSQL,True)
+    'Create dtPO
+    F.Intrinsic.String.Build("select A.QTY_ORDER - A.QTY_RECEIVED as QTY, case when isnull(B.DUE_DATE,'1900-01-01') = '1900-01-01' then case when A.DATE_DUE_LINE < CONVERT(NOW(),SQL_DATE) then CONVERT(DATEADD(day,45,NOW()),SQL_DATE) else A.DATE_DUE_LINE end else (case when B.DUE_DATE < CONVERT(NOW(),SQL_DATE) then CONVERT(dateadd(day,45,NOW()),SQL_DATE) else B.DUE_DATE end) end as DATE_MRP from V_PO_LINES A left outer join V_PO_CONTAINER B on A.PURCHASE_ORDER = B.PO and A.RECORD_NO = B.PO_LINE where A.PART = '{0}'",V.DataTable.dtMain(V.Local.iRow).PART!FieldValTrim,V.Local.sSQL)
+    F.Data.DataTable.CreateFromSQL("dtPO","con",V.Local.sSQL,True)
+    'Create dtWO
+    F.Intrinsic.String.Build("select QTY_ORDER - QTY_COMPLETED as QTY, case when DATE_DUE < CONVERT(NOW(),SQL_DATE) then CONVERT(NOW(),SQL_DATE) else DATE_DUE end as DATE_MRP from V_JOB_HEADER where DATE_CLOSED = '1900-01-01' and PART = '{0}'",V.DataTable.dtMain(V.Local.iRow).PART!FieldValTrim,V.Local.sSQL)
+    F.Data.DataTable.CreateFromSQL("dtWO","con",V.Local.sSQL,True)
+    'Create dtWOReq
+    F.Intrinsic.String.Build("select QTY_ISSUED - QTY_COMMITTED as QTY, case when DATE_DUE < CONVERT(NOW(),SQL_DATE) then CONVERT(NOW(),SQL_DATE) else DATE_DUE end as DATE_MRP from V_JOB_COMMITMENTS where PART = '{0}'",V.DataTable.dtMain(V.Local.iRow).PART!FieldValTrim,V.Local.sSQL)
+    F.Data.DataTable.CreateFromSQL("dtWOReq","con",V.Local.sSQL,True)
+    'Add today and On Hand Qty to dtMRP
+    V.Local.fQty.Set(V.DataTable.dtMain(V.Local.iRow).QTY_ONHAND!FieldVal)
+
+    'Merge all of the tables to dtMRP
+
+    F.Intrinsic.Control.If(V.DataTable.dtOrder.RowCount,>,0)
+        F.Data.DataTable.Merge("dtOrder","dtMRP",True,1)
+    F.Intrinsic.Control.EndIf
+    F.Intrinsic.Control.If(V.DataTable.dtPO.RowCount,>,0)
+        F.Data.DataTable.Merge("dtPO","dtMRP",True,1)
+    F.Intrinsic.Control.EndIf
+    F.Intrinsic.Control.If(V.DataTable.dtWO.RowCount,>,0)
+        F.Data.DataTable.Merge("dtWO","dtMRP",True,1)
+    F.Intrinsic.Control.EndIf
+    F.Intrinsic.Control.If(V.DataTable.dtWOReq.RowCount,>,0)
+        F.Data.DataTable.Merge("dtWOReq","dtMRP",True,1)
+    F.Intrinsic.Control.EndIf
+    V.Local.fPrev.Set(0)
+    F.Intrinsic.Control.If(V.DataTable.dtMRP.RowCount,>,0)
+        F.Data.DataTable.AddRow("dtMRP","DATE_MRP",V.Ambient.Date,"QTY",V.Local.fQty)
+        F.Intrinsic.Control.If(V.DataView.dtMRP!dvMRP.Exists,=,False)
+            F.Data.DataView.Create("dtMRP","dvMRP")
+			'Changed to QTY ASC from QTY DESC
+            F.Data.DataView.SetSort("dtMRP","dvMRP","DATE_MRP ASC, QTY ASC")
+        F.Intrinsic.Control.EndIf
+    F.Intrinsic.Control.EndIf
+
+	V.Local.fQty.Set(0)
+
+    'Loop through dvMRP to find the latest date where inventory is negative
+    F.Intrinsic.Control.For(V.Local.iCnt,0,V.DataTable.dtMRP.RowCount--,1)
+        'Still have records so need to do some cyphering
+        F.Intrinsic.Math.Add(V.Local.fQty,V.DataView.dtMRP!dvMRP(V.Local.iCnt).QTY!FieldVal,V.Local.fTemp)
+        'Is ftemp positive and fPrev negative
+        F.Intrinsic.Control.If(V.Local.fTemp,>,0,and,V.Local.fPrev,<=,0)
+            'Yes - save the date because MRP went from negative to positive
+            F.Intrinsic.String.Format(V.DataView.dtMRP!dvMRP(V.Local.iCnt).DATE_MRP!FieldVal,"MM/DD/YYYY",V.Local.sValue)
+        F.Intrinsic.Control.EndIf
+        V.Local.fPrev.Set(V.Local.fTemp)
+        V.Local.fQty.Set(V.Local.fTemp)
+    F.Intrinsic.Control.Next(V.Local.iCnt)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.If(V.Local.sValue.Trim,=,"")
+    V.Local.sValue.Set("No Stock")
+F.Intrinsic.Control.EndIf
+
+F.Data.DataTable.SetValue("dtMain",V.Local.iRow,"DATE_AVAILABLE",V.Local.sValue)
+Program.Sub.Generate_MRP_Date.End
+
+Program.Sub.connect.Start
+F.ODBC.Connection!con.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass)
+Program.Sub.connect.End
+
+Program.Sub.disconnect.Start
+F.ODBC.Connection!con.Close
+Program.Sub.disconnect.End
+
+Program.Sub.LoaddtMain.Start
+V.Local.sSQL.Declare
+
+F.Intrinsic.Control.If(V.DataTable.dtMain.Exists,=,True)
+	F.Data.DataTable.DeleteRow("dtMain")
+	F.Data.DataTable.Close("dtMain")
+F.Intrinsic.Control.EndIf
+
+V.Local.sSQL.Set("select PART, LOCATION, QTY_ONHAND /* + QTY_ONORDER_WO */ - QTY_REQUIRED as INVENTORY, QTY_ONHAND + QTY_ONORDER_PO + QTY_ONORDER_WO - QTY_REQUIRED as QTY_NET, QTY_ONHAND from V_INVENTORY_ALL")
+
+F.Data.DataTable.CreateFromSQL("dtMain","con",V.Local.sSQL,True)
+F.Data.DataTable.AddColumn("dtMain","DATE_AVAILABLE","String")
+
+
+Program.Sub.LoaddtMain.End
+
+Program.Sub.SavetoDB.Start
+V.Local.sSQL.Declare
+
+V.Local.sSQL.Set("delete from GAB_MRP_DATE")
+
+F.ODBC.Connection!con.Execute(V.Local.sSQL)
+
+F.Data.DataTable.SaveToDB("dtMain","con","GAB_MRP_DATE","PART*!*LOCATION",128)
+Program.Sub.SavetoDB.End
+
+Program.Sub.Comments.Start
+${$0$}$$}$JWERTH$}$2/20/2018 12:42:37 PM$}$False
+Program.Sub.Comments.End
